@@ -1,7 +1,6 @@
 import mlx.core as mx
 import mlx.nn as nn
-from decoder import DecoderLayer
-
+from llama.decoder import DecoderLayer
 
 class LLaMa(nn.Module):
     def __init__(self, number_of_decoder_layers:int, vocabulary_size:int, token_dimensions:int, mlp_dimensions:int, number_of_heads:int):
@@ -23,14 +22,20 @@ class LLaMa(nn.Module):
 
         token_embedding = self.token_embedding(x)
 
-        for layer in self.decoder_layers:
-            token_embedding, key_value_cache = layer(token_embedding, mask, key_value_cache)
+        for decoder_layer in self.decoder_layers:
+            token_embedding, key_value_cache = decoder_layer(token_embedding, mask, key_value_cache)
         
         attention_normalization = self.normalization(token_embedding)
         output = self.linear_feedforward(attention_normalization)
         return output
     
-    def generate(self, x, temp=1.0):
+    def generate(self, x, temp=0.0):
+        def sample(logits):
+            if temp == 0:
+                return mx.argmax(logits, axis=-1)
+            else:
+                return mx.random.categorical(logits * (1 / temp))
+            
         generation_key_value_cache = []
 
         # Make an additive causal mask. We will need that to process the prompt.
@@ -40,17 +45,14 @@ class LLaMa(nn.Module):
         # First we process the prompt x the same way as in __call__ but
         # save the caches in cache
         token_embedding = self.token_embedding(x)
-        layer_processing = 0
         for layer in self.decoder_layers:
-            print(f"Processing layer {layer_processing}")
             token_embedding, key_value_cache = layer(token_embedding, mask)
             generation_key_value_cache.append(key_value_cache)
-            layer_processing += 1
 
         attention_normalization = self.normalization(token_embedding)
         y = self.linear_feedforward(attention_normalization[:, -1])  # <--- we only care about the last logits
                                      #      that generate the next token
-        y = mx.random.categorical(y * (1/temp))
+        y = sample(y)
 
         # y now has size [1]
         # Since MLX is lazily evaluated nothing is computed yet.
@@ -75,6 +77,6 @@ class LLaMa(nn.Module):
                 x, generation_key_value_cache[i] = self.decoder_layers[i](x, mask=None, key_value_cache=generation_key_value_cache[i])
             x = self.normalization(x)
             y = self.linear_feedforward(x[:, -1])
-            y = mx.random.categorical(y * (1/temp))
+            y = sample(y)
 
             yield y

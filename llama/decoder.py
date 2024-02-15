@@ -1,7 +1,6 @@
 import mlx.core as mx
 import mlx.nn as nn
-from attention import AttentionLayer
-from swiglu import SwiGLU
+from llama.attention import AttentionLayer
 
 class DecoderLayer(nn.Module):
     def __init__(self, token_dimensions: int, mlp_dimensions:int, number_of_heads: int):
@@ -17,9 +16,10 @@ class DecoderLayer(nn.Module):
         self.linear_feedforward = nn.Linear(mlp_dimensions, token_dimensions, bias=False)
 
     def __call__(self, x, mask=None, key_value_cache=None):
-        
+        token_embedding_normalization = self.embedding_normalization(x)
+
         attention_output, key_value_cache = self.self_attention(
-            self.embedding_normalization(x),
+            token_embedding_normalization,
             mask=mask,
             key_value_cache=key_value_cache
         )
@@ -27,10 +27,9 @@ class DecoderLayer(nn.Module):
         attention_output = x + attention_output
 
         attention_normalization = self.attention_normalization(attention_output)
+        swiglu_feedforward = self.linear_feedforward(nn.silu(self.linear_gate(attention_normalization)) * self.linear_gate_feedforward(attention_normalization))
         
-        attention_output = self.linear_feedforward(nn.silu(self.linear_gate(attention_normalization)) * self.linear_gate_feedforward(attention_normalization))
-        
-        output = x + attention_output
+        output = attention_output + swiglu_feedforward
 
         return output, key_value_cache
     
